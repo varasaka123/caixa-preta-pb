@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Detecção de Pessoas PB</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain;
+    }
+    video {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => resolve(video);
+      });
+    }
+
+    function applyBlackAndWhite() {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i+1];
+        const b = data[i+2];
+        // média simples para PB
+        const gray = 0.299*r + 0.587*g + 0.114*b;
+        data[i] = data[i+1] = data[i+2] = gray;
+      }
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    async function detect(model) {
+      const videoWidth = video.videoWidth;
+      const videoHeight = video.videoHeight;
+
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const scale = Math.min(canvas.width / videoWidth, canvas.height / videoHeight);
+      const xOffset = (canvas.width - videoWidth * scale) / 2;
+      const yOffset = (canvas.height - videoHeight * scale) / 2;
+
+      // Desenha vídeo
+      ctx.drawImage(video, 0, 0, videoWidth, videoHeight,
+                    xOffset, yOffset, videoWidth * scale, videoHeight * scale);
+
+      // Converte para PB
+      applyBlackAndWhite();
+
+      // Faz detecção
+      const predictions = await model.detect(video);
+
+      predictions.forEach(pred => {
+        if (pred.class === 'person') {
+          const [x, y, width, height] = pred.bbox;
+
+          const adjX = x * scale + xOffset;
+          const adjY = y * scale + yOffset;
+          const adjW = width * scale;
+          const adjH = height * scale;
+
+          // Máscara preta sobre pessoa
+          ctx.fillStyle = 'black';
+          ctx.fillRect(adjX, adjY, adjW, adjH);
+
+          ctx.strokeStyle = 'black';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(adjX, adjY, adjW, adjH);
+        }
+      });
+
+      requestAnimationFrame(() => detect(model));
+    }
+
+    async function main() {
+      await setupCamera();
+      video.play();
+      const model = await cocoSsd.load();
+      detect(model);
+    }
+
+    main();
+  </script>
+</body>
+</html>
